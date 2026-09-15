@@ -2,8 +2,13 @@ node_modules/
 dist/
 .env
 *.log
+# `uploads/**` alone excludes the `products` directory itself, which then
+# stops git from descending into it to find the negated .gitkeep below —
+# the directory has to be un-ignored explicitly too, or the placeholder
+# silently never gets tracked (this bit us once already).
 uploads/**
 !uploads/.gitkeep
+!uploads/products/
 !uploads/products/.gitkeep
 coverage/
 .DS_Store
