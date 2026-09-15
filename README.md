@@ -103,7 +103,7 @@ To deploy manually instead: SSH in, `cd /opt/celestial-backend`,
 
 ```bash
 crontab -e
-# 0 3 * * * cd /opt/celestial-backend && ./scripts/backup.sh >> /var/log/celestial-backup.log 2>&1
+# 0 3 * * * cd /var/www/celestial-backend && ./scripts/backup.sh >> /var/log/celestial-backup.log 2>&1
 ```
 
 Writes gzipped `mongodump` archives to `./backups`, pruned after 14 days.
