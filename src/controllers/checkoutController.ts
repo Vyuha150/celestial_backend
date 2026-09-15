@@ -21,6 +21,25 @@ type ShippingAddress = {
   phone: string;
 };
 
+async function releaseStockAndCancel(order: HydratedDocument<OrderDoc>, note: string): Promise<void> {
+  for (const item of order.items) {
+    const product = await Product.findByIdAndUpdate(item.product, { $inc: { stock: item.qty } }, { new: true });
+    if (product) {
+      await InventoryLog.create({
+        product: product._id,
+        change: item.qty,
+        balanceAfter: product.stock,
+        reason: "cancellation",
+        order: order._id,
+        note,
+      });
+    }
+  }
+  order.status = "cancelled";
+  order.statusHistory.push({ status: "cancelled", note });
+  await order.save();
+}
+
 // Creates a Pending order, atomically reserving stock for every line item
 // inside a transaction (all-or-nothing — a mid-checkout stock race on one
 // item rolls the whole reservation back rather than leaving partial state),
@@ -136,12 +155,29 @@ export async function createCheckoutSession(req: Request, res: Response) {
 
   if (!order) throw ApiError.badRequest("Failed to create order");
 
-  const razorpayOrder = await razorpay.orders.create({
-    amount: Math.round(order.total * 100),
-    currency: "INR",
-    receipt: order.orderNumber,
-    notes: { orderId: String(order._id) },
-  });
+  // The stock reservation above is already committed. If the Razorpay call
+  // fails, that reservation must be released and the order cancelled —
+  // otherwise a gateway outage would permanently strand stock behind an
+  // order the customer has no way to ever pay for.
+  let razorpayOrder;
+  try {
+    razorpayOrder = await razorpay.orders.create({
+      amount: Math.round(order.total * 100),
+      currency: "INR",
+      receipt: order.orderNumber,
+      notes: { orderId: String(order._id) },
+    });
+  } catch (err) {
+    await releaseStockAndCancel(order, "Razorpay order creation failed");
+    await Payment.create({
+      order: order._id,
+      event: "order.create_failed",
+      status: "failed",
+      amount: order.total,
+      rawPayload: err instanceof Error ? { message: err.message } : err,
+    });
+    throw new ApiError(502, "Payment gateway is unavailable right now. Please try again shortly.");
+  }
 
   order.razorpayOrderId = razorpayOrder.id;
   await order.save();

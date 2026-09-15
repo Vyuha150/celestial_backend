@@ -1,19 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import request from "supertest";
 
+const createOrderMock = vi.fn(async (opts: { amount: number; currency: string; receipt: string }) => ({
+  id: `order_mock_${opts.receipt}`,
+  amount: opts.amount,
+  currency: opts.currency,
+}));
+
 vi.mock("../src/utils/razorpay.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/utils/razorpay.js")>();
   return {
     ...actual,
-    razorpay: {
-      orders: {
-        create: vi.fn(async (opts: { amount: number; currency: string; receipt: string }) => ({
-          id: `order_mock_${opts.receipt}`,
-          amount: opts.amount,
-          currency: opts.currency,
-        })),
-      },
-    },
+    razorpay: { orders: { create: createOrderMock } },
   };
 });
 
@@ -121,5 +119,41 @@ describe("checkout stock reservation", () => {
     const { product } = await seedProduct(1);
 
     await agent.post("/cart/items").send({ productId: String(product._id), qty: 5 }).expect(409);
+  });
+
+  it("releases reserved stock and cancels the order if the payment gateway call fails", async () => {
+    const { product } = await seedProduct(5);
+
+    await agent.post("/cart/items").send({ productId: String(product._id), qty: 3 }).expect(201);
+
+    createOrderMock.mockRejectedValueOnce({ statusCode: 401, error: { description: "Authentication failed" } });
+
+    await agent
+      .post("/checkout/session")
+      .send({
+        customerName: "Alan Turing",
+        customerEmail: "alan@example.com",
+        shippingAddress: {
+          line1: "Bletchley Park",
+          city: "Milton Keynes",
+          state: "England",
+          postalCode: "MK3 6EB",
+          country: "GB",
+          phone: "+441234567891",
+        },
+      })
+      .expect(502);
+
+    // Stock reserved during the transaction must be given back...
+    const restocked = await Product.findById(product._id);
+    expect(restocked!.stock).toBe(5);
+
+    // ...and the stranded order marked cancelled, not left "pending" forever.
+    const order = await Order.findOne({ customerEmail: "alan@example.com" });
+    expect(order).not.toBeNull();
+    expect(order!.status).toBe("cancelled");
+
+    const restockLog = await InventoryLog.findOne({ product: product._id, reason: "cancellation" });
+    expect(restockLog!.change).toBe(3);
   });
 });

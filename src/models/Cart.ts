@@ -12,10 +12,10 @@ const cartItemSchema = new Schema(
 
 const cartSchema = new Schema(
   {
-    sessionId: { type: String, required: true, unique: true, index: true },
+    sessionId: { type: String, required: true, unique: true },
     user: { type: Schema.Types.ObjectId, ref: "User", default: null },
     items: { type: [cartItemSchema], default: [] },
-    expiresAt: { type: Date, required: true, index: true },
+    expiresAt: { type: Date, required: true }, // TTL index declared below
   },
   { timestamps: true },
 );

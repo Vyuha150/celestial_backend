@@ -3,6 +3,7 @@
 // free-text pricing "tier" into a real Product with a numeric price.
 // Run with: npm run seed
 import "dotenv/config";
+import { fileURLToPath } from "node:url";
 import { connectDb, disconnectDb } from "./config/db.js";
 import { Category } from "./models/Category.js";
 import { Product } from "./models/Product.js";
@@ -421,8 +422,9 @@ const seedPages = [
 
 const DEFAULT_STOCK = 150;
 
-async function run() {
-  await connectDb();
+// Seeding logic only — no connect/disconnect, so it can also be called
+// from scripts/dev-memory-db.ts against an already-open connection.
+export async function execSeed(): Promise<void> {
   logger.info("Seeding database...");
 
   await Setting.findOneAndUpdate({ key: "store" }, { key: "store" }, { upsert: true });
@@ -461,10 +463,17 @@ async function run() {
   }
 
   logger.info("Seed complete. Create the first admin via POST /auth/bootstrap-admin.");
-  await disconnectDb();
 }
 
-run().catch((err) => {
-  logger.error({ err }, "Seed failed");
-  process.exit(1);
-});
+// Only run as a standalone CLI script (`npm run seed`) — not when imported
+// by scripts/dev-memory-db.ts, which manages the connection itself.
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+if (isMain) {
+  connectDb()
+    .then(execSeed)
+    .then(disconnectDb)
+    .catch((err) => {
+      logger.error({ err }, "Seed failed");
+      process.exit(1);
+    });
+}
