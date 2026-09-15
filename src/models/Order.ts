@@ -57,6 +57,13 @@ const orderSchema = new Schema(
     razorpayPaymentId: { type: String },
     razorpaySignature: { type: String },
     paidAt: { type: Date },
+    tracking: {
+      carrier: { type: String },
+      trackingNumber: { type: String },
+      trackingUrl: { type: String },
+      shippedAt: { type: Date },
+      deliveredAt: { type: Date },
+    },
   },
   { timestamps: true },
 );

@@ -69,9 +69,43 @@ export async function updateOrderStatus(req: Request, res: Response) {
 
   order.status = status as typeof order.status;
   order.statusHistory.push({ status, changedBy: req.user?.sub as never, note });
+
+  // Auto-stamp the tracking timeline so "shipped"/"delivered" carry a
+  // timestamp even if the admin never separately fills in tracking details.
+  if (status === "shipped" && !order.tracking?.shippedAt) {
+    order.tracking ??= {};
+    order.tracking.shippedAt = new Date();
+  }
+  if (status === "delivered" && !order.tracking?.deliveredAt) {
+    order.tracking ??= {};
+    order.tracking.deliveredAt = new Date();
+  }
+
   await order.save();
 
   await recordAudit(req, "order.status_update", "Order", String(order._id), { from: previousStatus, to: status });
+  res.json(order);
+}
+
+// Delivery tracking — separate from status changes so an admin can attach
+// a carrier/tracking number at any point without forcing a status change.
+export async function updateTracking(req: Request, res: Response) {
+  const { carrier, trackingNumber, trackingUrl } = req.body as {
+    carrier?: string;
+    trackingNumber?: string;
+    trackingUrl?: string;
+  };
+
+  const order = await Order.findById(req.params.id);
+  if (!order) throw ApiError.notFound("Order not found");
+
+  order.tracking ??= {};
+  if (carrier !== undefined) order.tracking.carrier = carrier;
+  if (trackingNumber !== undefined) order.tracking.trackingNumber = trackingNumber;
+  if (trackingUrl !== undefined) order.tracking.trackingUrl = trackingUrl;
+
+  await order.save();
+  await recordAudit(req, "order.tracking_update", "Order", String(order._id), { carrier, trackingNumber, trackingUrl });
   res.json(order);
 }
 
